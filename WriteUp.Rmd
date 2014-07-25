@@ -1,0 +1,123 @@
+---
+title: "Practical Machine Learning - Assignment write-up"
+output: html_document
+---
+
+Data loading and assessment
+---
+
+I loaded the data and partitioned into training and validation sets. I used a partition of 0.6 for training:
+```{r}
+dat <- read.csv(file="pml-training.csv", header=T, na.strings=c("NA", ""))
+dim(dat)
+library(caret)
+set.seed(123)
+part <- createDataPartition(y=dat$classe, p=0.6, list=F)
+training <- dat[part, ]
+validation <- dat[-part, ]
+dim(training)
+```
+
+A quick check of the outcome variables shows the presence of 5 outcome categories. These are more or less equally represented within the training data set:
+```{r}
+table(training$classe)
+```
+
+The summary statistics of the training data set (not shown for the sake of space) indicates the presence of predictor columns with a high number of NAs. I subset the training dataset to columns that contain no 'NA' values:
+```{r}
+##remove all columns that contain any number of 'NA's
+training <- training[ ,apply(training, 2, function(x) sum(is.na(x)) == 0)] 
+dim(training)
+```
+
+The first 7 columns of the data frame contain irrelevant predictors, so I removed them from the training data frame for ease of handling:
+```{r}
+head(colnames(training), n=10)
+## remove the first 7 columns
+training <- training[ ,8:ncol(training)] 
+dim(training)
+```
+
+I created a matrix to assess correlation between predictors:
+```{r}
+## create a matrix with pair-wise correlations of columns, leaving out the classifier column
+mat <- cor(training[ ,1:ncol(training)-1]) 
+## plot matrix with 'image' function
+image(1:ncol(mat), 1:ncol(mat), mat, xaxt="n", xlab="", yaxt="n", ylab="", main="Predictor Correlation Matrix") 
+for(i in 1:ncol(mat)) {
+  for(j in 1:nrow(mat)) {
+    text(i,j,labels=format(mat[i,j], digits=2), cex=0.3)
+  }
+}
+axis(side=1, at=seq(1,ncol(mat),by=1), labels=colnames(mat), cex.axis=0.5, las=2)
+axis(side=2, at=seq(1, nrow(mat), by=1), labels=rownames(mat), cex.axis=0.5, las=2)
+```
+
+A number of predictors are highly correlated. I decided to remove these from the training data:
+```{r}
+## count the number of descriptors with a very high (>0.9) correlation
+sum(abs(mat[upper.tri(mat)]) > 0.8) 
+## identify pairs of descriptor columns with high correlation
+hi.cor <- findCorrelation(mat, cutoff = 0.8)
+## remove highly correlated descriptors
+training <- training[, -hi.cor] 
+dim(training)
+```
+
+Model building
+---
+
+I decided to build a model based on random forest analysis, a suitable algorithm for large numbers of predictors:
+```{r}
+set.seed(111)
+mod.rf <- train(classe ~ ., data=training, method="rf", trControl=trainControl(method="cv"))
+
+## final model:
+mod.rf$finalModel
+```
+
+Model error estimation
+---
+
+To determine the out-of-sample error, I applied the model to the 'validation' dataset and assessed the confusion matrix:
+```{r}
+confusionMatrix(predict(mod.rf,newdata=validation), validation$classe)
+
+## calculated out-of-sample error rate:
+(1-0.989)*100
+```
+
+Model application
+---
+
+Loading the testing data set and performing analysis with the random forest model above:
+```{r}
+test <- read.csv(file="pml-testing.csv", header=T, na.strings=c("NA", ""))
+dim(test)
+
+test.results <- predict(mod.rf, newdata=test)
+test.results
+```
+
+Write files for grading submission
+---
+
+The function provided on the course assignment page will generate individual files for each tested 'classe' output for grading:
+```{r}
+## defining the function
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+## running the function on the test results output
+pml_write_files(test.results)
+```
+
+Summary
+---
+
+Here, I have used the provided testing data set to build a prediction model based on the random forest method. The estimated out-of-sample error rate of the model is 1.1%. I have used this model to predict the 'classe' variable for 20 test sets. The prediction for all 20 cases were correct as per submission to the Coursera assignment grading system.
